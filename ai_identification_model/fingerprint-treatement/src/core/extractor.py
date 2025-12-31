@@ -6,7 +6,7 @@ from typing import List, Dict, Optional
 
 # --- Configuration ---
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = BASE_DIR / 'data' / 'archive' / 'SOCOFing' / 'Real'
+DATA_DIR = BASE_DIR / 'data' / 'images' 
 OUTPUT_DIR = BASE_DIR / 'data'
 MODEL_DIR = BASE_DIR / 'models'
 

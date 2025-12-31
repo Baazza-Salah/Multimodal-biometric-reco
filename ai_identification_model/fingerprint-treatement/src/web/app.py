@@ -58,25 +58,31 @@ def extract_feature():
         
         # Extract features
         try:
-            features = extractor.extract_features(temp_path)
+            # Returns a list of dicts (original + augmented)
+            features_list = extractor.extract_features(temp_path)
             
-            # Add filename with name (e.g., user1_1.bmp)
-            # We need to handle unique filenames or just use what user provided + timestamp or count
-            # For simplicity, let's assume user handles unique naming or we append a count if we had state
-            # But here we just use the provided name and maybe original extension
+            # Update filename for all features
             ext = Path(file.filename).suffix
+            # We use the provided name as the identifier
+            # In the CSV, 'filename' column is used as the label
             filename = f"{name}{ext}" 
-            features['filename'] = filename
+            
+            for feat in features_list:
+                feat['filename'] = filename
             
             # Append to CSV
-            df = pd.DataFrame([features])
+            df = pd.DataFrame(features_list)
+            
+            # Ensure columns are in correct order (filename first)
+            cols = ['filename'] + [c for c in df.columns if c != 'filename']
+            df = df[cols]
             
             if not CSV_PATH.exists():
                 df.to_csv(CSV_PATH, index=False)
             else:
                 df.to_csv(CSV_PATH, mode='a', header=False, index=False)
                 
-            return jsonify({'status': 'success', 'message': f'Features extracted for {name}'})
+            return jsonify({'status': 'success', 'message': f'Features extracted for {name} ({len(features_list)} samples)'})
             
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)})
@@ -106,42 +112,73 @@ def identify():
             
         temp_path = save_upload(file, 'temp_probe.bmp')
         
-        # Extract features
-        features_dict = extractor.extract_features(temp_path)
-        del features_dict['filename']
-        probe_features = np.array(list(features_dict.values()), dtype='float32')
+        # Extract features manually to avoid augmentation and ensure consistency
+        try:
+            image = cv2.imread(str(temp_path), cv2.IMREAD_UNCHANGED)
+            if image is None:
+                raise ValueError("Cannot read image")
+                
+            if len(image.shape) == 3:
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = image
+            gray = gray.astype(np.uint8)
+            
+            # Resize and Equalize
+            resized = cv2.resize(gray, extractor.win_size)
+            processed = cv2.equalizeHist(resized)
+            
+            # Compute HOG
+            hog_feats = extractor.hog.compute(processed)
+            
+            if hog_feats is None:
+                raise ValueError("Could not extract HOG features")
+                
+            probe_features = hog_feats.flatten()
+            
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': f"Extraction error: {str(e)}"})
         
         results = {}
         
         # 1. Math Matcher Identification
+        # MathMatcher might not be optimized for HOG features but we'll try
         if CSV_PATH.exists():
-            labels, db_features = load_database(CSV_PATH)
-            if len(labels) > 0:
-                math_matcher = MathMatcher()
-                math_matcher.fit(db_features, labels)
-                math_id, math_conf, _ = math_matcher.identify(probe_features, min_absolute=70.0)
-                
-                results['math'] = {
-                    'identified': math_id if math_conf['absolute'] >= 70.0 else "Unknown",
-                    'confidence': math_conf['absolute'],
-                    'gap': math_conf['gap']
-                }
-            else:
-                 results['math'] = {'error': 'Database empty'}
+            try:
+                labels, db_features = load_database(CSV_PATH)
+                if len(labels) > 0:
+                    math_matcher = MathMatcher()
+                    math_matcher.fit(db_features, labels)
+                    # HOG features are large, distance thresholds might need adjustment
+                    # For now we use the default or what was there
+                    math_id, math_conf, _ = math_matcher.identify(probe_features, min_absolute=70.0)
+                    
+                    results['math'] = {
+                        'identified': math_id if math_conf['absolute'] >= 70.0 else "Unknown",
+                        'confidence': math_conf['absolute'],
+                        'gap': math_conf['gap']
+                    }
+                else:
+                     results['math'] = {'error': 'Database empty'}
+            except Exception as e:
+                results['math'] = {'error': f"Math Matcher error: {str(e)}"}
         else:
             results['math'] = {'error': 'Database not found'}
         
         # 2. ML Matcher Identification
         if ML_MODEL_PATH.exists():
-            ml_matcher = MLMatcher()
-            ml_matcher.load(ML_MODEL_PATH)
-            ml_id, ml_conf, _ = ml_matcher.identify(probe_features, min_confidence=70.0)
-            
-            results['ml'] = {
-                'identified': ml_id if ml_conf['confidence'] >= 70.0 else "Unknown",
-                'confidence': ml_conf['confidence'],
-                'probability': ml_conf['probability']
-            }
+            try:
+                ml_matcher = MLMatcher()
+                ml_matcher.load(ML_MODEL_PATH)
+                ml_id, ml_conf, _ = ml_matcher.identify(probe_features, min_confidence=70.0)
+                
+                results['ml'] = {
+                    'identified': ml_id if ml_conf['confidence'] >= 70.0 else "Unknown",
+                    'confidence': ml_conf['confidence'],
+                    'probability': ml_conf['probability']
+                }
+            except Exception as e:
+                results['ml'] = {'error': f"ML Matcher error: {str(e)}"}
         else:
             results['ml'] = {'error': 'Model not trained'}
             
