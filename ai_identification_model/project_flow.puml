@@ -1,0 +1,81 @@
+@startuml
+skinparam monochrome true
+skinparam shadowing false
+
+actor "User" as User
+participant "Web App\n(Flask)" as WebApp
+participant "Face Extractor\n(MediaPipe/CV2)" as Extractor
+database "CSV Database\n(Features)" as DB
+participant "ML Trainer\n(Scikit-Learn)" as Trainer
+participant "Matchers\n(Math & ML)" as Matcher
+
+== 📸 Registration Process ==
+
+User -> WebApp: 1. Enter Name & Start Camera
+activate WebApp
+
+loop 20 Times (1 capture/sec)
+    WebApp -> Extractor: 2. Send Frame
+    activate Extractor
+    
+    Extractor -> Extractor: Detect Face (MediaPipe)
+    Extractor -> Extractor: Normalize (Align/Crop/Resize)
+    Extractor -> Extractor: Extract 27 Geometric Features
+    
+    Extractor -> DB: 3. Append Features + Label
+    deactivate Extractor
+    
+    WebApp -> User: Update Progress
+end
+
+WebApp -> Trainer: 4. Trigger Model Retraining
+activate Trainer
+
+Trainer -> DB: Load All Data
+Trainer -> Trainer: Train KNN, SVM, RF
+Trainer -> Trainer: Select Best Model (Auto)
+Trainer -> Trainer: Save 'trained_model.pkl'
+
+Trainer --> WebApp: Training Complete
+deactivate Trainer
+
+WebApp --> User: Registration Success!
+deactivate WebApp
+
+== 🔍 Identification Process ==
+
+User -> WebApp: 1. Upload Image OR Use Camera
+activate WebApp
+
+WebApp -> Extractor: 2. Extract Probe Features
+activate Extractor
+Extractor --> WebApp: Return Feature Vector
+deactivate Extractor
+
+par Parallel Matching
+    group Math Matcher (Geometric)
+        WebApp -> Matcher: Identify(Vector)
+        activate Matcher
+        Matcher -> DB: Load Templates
+        Matcher -> Matcher: Calc Weighted Euclidean Dist
+        Matcher --> WebApp: Result (Name + % Match)
+        deactivate Matcher
+    end
+    
+    group ML Matcher (AI Model)
+        WebApp -> Matcher: Identify(Vector)
+        activate Matcher
+        Matcher -> Matcher: Load 'trained_model.pkl'
+        Matcher -> Matcher: Predict Class + Probability
+        Matcher --> WebApp: Result (Name + % Confidence)
+        deactivate Matcher
+    end
+end
+
+WebApp -> WebApp: Check Threshold (> 80%)
+note right: If confidence < 80%,\nreturn "Unknown"
+
+WebApp --> User: 3. Display Comparison Results
+deactivate WebApp
+
+@enduml

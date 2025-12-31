@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Biometric Identification</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f0f2f5;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #1a73e8;
+        }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #ddd;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            font-weight: bold;
+            color: #666;
+        }
+
+        .tab.active {
+            color: #1a73e8;
+            border-bottom: 2px solid #1a73e8;
+            margin-bottom: -2px;
+        }
+
+        .section {
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        /* Camera & Video */
+        #video {
+            width: 100%;
+            max-width: 400px;
+            border-radius: 8px;
+            background: #000;
+            display: block;
+            margin: 0 auto;
+        }
+
+        #canvas {
+            display: none;
+        }
+
+        /* Controls */
+        .controls {
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        input[type="text"] {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: 200px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:disabled {
+            background: #ccc;
+        }
+
+        button.secondary {
+            background: #5f6368;
+        }
+
+        /* Progress */
+        #progress-container {
+            display: none;
+            margin-top: 20px;
+        }
+
+        progress {
+            width: 100%;
+            height: 20px;
+        }
+
+        #status {
+            text-align: center;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
+        /* Results */
+        .result-box {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            background: #f8f9fa;
+        }
+
+        .match-success {
+            color: green;
+            font-weight: bold;
+        }
+
+        .match-fail {
+            color: red;
+            font-weight: bold;
+        }
+
+        .comparison {
+            display: flex;
+            gap: 20px;
+        }
+
+        .method {
+            flex: 1;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Biometric ID System</h1>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('register')">Register</div>
+            <div class="tab" onclick="switchTab('identify')">Identify</div>
+        </div>
+
+        <!-- REGISTER SECTION -->
+        <div id="register" class="section active">
+            <div class="controls">
+                <input type="text" id="nameInput" placeholder="Enter Name (e.g. Salah)">
+                <button onclick="startCamera()">Open Camera</button>
+            </div>
+
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas"></canvas>
+
+            <div class="controls">
+                <button id="startBtn" onclick="startRegistration()" disabled>Start Registration (20s)</button>
+            </div>
+
+            <div id="progress-container">
+                <progress id="progressBar" value="0" max="20"></progress>
+                <div id="status">Ready</div>
+            </div>
+        </div>
+
+        <!-- IDENTIFY SECTION -->
+        <div id="identify" class="section">
+            <div class="controls">
+                <button onclick="showIdentifyMode('upload')" id="btnUploadMode" class="active">Upload Image</button>
+                <button onclick="showIdentifyMode('camera')" id="btnCameraMode">Use Camera</button>
+            </div>
+
+            <!-- Upload Mode -->
+            <div id="identify-upload" style="border: 2px dashed #ddd; padding: 40px; text-align: center;">
+                <input type="file" id="fileInput" accept="image/*" onchange="previewImage()">
+                <br><br>
+                <img id="preview" style="max-width: 200px; display: none; border-radius: 8px; margin: 0 auto;">
+                <br><br>
+                <button onclick="identifyPersonFile()">Identify Person</button>
+            </div>
+
+            <!-- Camera Mode -->
+            <div id="identify-camera" style="display: none; text-align: center;">
+                <button onclick="startIdentifyCamera()">Open Camera</button>
+                <br><br>
+                <video id="videoIdentify"
+                    style="width: 100%; max-width: 400px; border-radius: 8px; background: #000; display: none;" autoplay
+                    playsinline></video>
+                <canvas id="canvasIdentify" style="display: none;"></canvas>
+                <br><br>
+                <button id="btnCaptureIdentify" onclick="captureAndIdentify()" disabled>Capture & Identify</button>
+            </div>
+
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <script>
+        let stream = null;
+        let identifyStream = null;
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+
+            stopCamera();
+            stopIdentifyCamera();
+        }
+
+        function showIdentifyMode(mode) {
+            if (mode === 'upload') {
+                document.getElementById('identify-upload').style.display = 'block';
+                document.getElementById('identify-camera').style.display = 'none';
+                stopIdentifyCamera();
+            } else {
+                document.getElementById('identify-upload').style.display = 'none';
+                document.getElementById('identify-camera').style.display = 'block';
+            }
+        }
+
+        // --- Registration Camera ---
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+                document.getElementById('startBtn').disabled = false;
+            } catch (err) {
+                alert("Error accessing camera: " + err);
+            }
+        }
+
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+        }
+
+        // --- Identification Camera ---
+        async function startIdentifyCamera() {
+            try {
+                identifyStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const video = document.getElementById('videoIdentify');
+                video.style.display = 'block';
+                video.srcObject = identifyStream;
+                document.getElementById('btnCaptureIdentify').disabled = false;
+            } catch (err) {
+                alert("Error accessing camera: " + err);
+            }
+        }
+
+        function stopIdentifyCamera() {
+            if (identifyStream) {
+                identifyStream.getTracks().forEach(track => track.stop());
+                identifyStream = null;
+                document.getElementById('videoIdentify').style.display = 'none';
+            }
+        }
+
+        async function startRegistration() {
+            const name = document.getElementById('nameInput').value.trim();
+            if (!name) { alert("Please enter a name"); return; }
+
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('progress-container').style.display = 'block';
+
+            let count = 1;
+            const max = 20;
+
+            const interval = setInterval(async () => {
+                if (count > max) {
+                    clearInterval(interval);
+                    finishRegistration();
+                    return;
+                }
+
+                document.getElementById('status').innerText = `Capturing feature ${count}/${max}...`;
+                document.getElementById('progressBar').value = count;
+
+                await captureAndSend(name, count);
+                count++;
+            }, 1000);
+        }
+
+        async function captureAndSend(name, count) {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const context = canvas.getContext('2d');
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0);
+
+            const imageData = canvas.toDataURL('image/jpeg');
+
+            try {
+                const response = await fetch('/extract_feature', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: imageData, name: name, count: count })
+                });
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function finishRegistration() {
+            document.getElementById('status').innerText = "Training model...";
+            try {
+                const response = await fetch('/train', { method: 'POST' });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    document.getElementById('status').innerText = "Registration Complete!";
+                    alert("Registration Successful!");
+                }
+            } catch (err) {
+                alert("Error: " + err);
+            }
+            document.getElementById('startBtn').disabled = false;
+        }
+
+        function previewImage() {
+            const file = document.getElementById('fileInput').files[0];
+            const preview = document.getElementById('preview');
+            const reader = new FileReader();
+            reader.onloadend = function () {
+                preview.src = reader.result;
+                preview.style.display = 'block';
+            }
+            if (file) reader.readAsDataURL(file);
+        }
+
+        async function identifyPersonFile() {
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput.files.length === 0) { alert("Select an image first"); return; }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            sendIdentifyRequest(formData, false);
+        }
+
+        async function captureAndIdentify() {
+            const video = document.getElementById('videoIdentify');
+            const canvas = document.getElementById('canvasIdentify');
+            const context = canvas.getContext('2d');
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0);
+
+            const imageData = canvas.toDataURL('image/jpeg');
+
+            sendIdentifyRequest(JSON.stringify({ image: imageData }), true);
+        }
+
+        async function sendIdentifyRequest(body, isJson) {
+            document.getElementById('results').innerHTML = "Identifying...";
+
+            try {
+                const options = { method: 'POST', body: body };
+                if (isJson) {
+                    options.headers = { 'Content-Type': 'application/json' };
+                }
+
+                const response = await fetch('/identify', options);
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    displayResults(data.results);
+                } else {
+                    document.getElementById('results').innerText = "Error: " + data.message;
+                }
+            } catch (err) {
+                document.getElementById('results').innerText = "Error: " + err;
+            }
+        }
+
+        function displayResults(results) {
+            const math = results.math;
+            const ml = results.ml;
+
+            const html = `
+                <div class="comparison">
+                    <div class="method">
+                        <h3>Math Matcher</h3>
+                        <p>Identified: <span class="${math.identified !== 'Unknown' ? 'match-success' : 'match-fail'}">${math.identified}</span></p>
+                        <p>Confidence: ${math.confidence.toFixed(1)}%</p>
+                        <p>Gap: ${math.gap.toFixed(1)}%</p>
+                    </div>
+                    <div class="method">
+                        <h3>ML Matcher</h3>
+                        <p>Identified: <span class="${ml.identified !== 'Unknown' ? 'match-success' : 'match-fail'}">${ml.identified}</span></p>
+                        <p>Confidence: ${ml.confidence ? ml.confidence.toFixed(1) + '%' : 'N/A'}</p>
+                        <p>Probability: ${ml.probability ? ml.probability.toFixed(4) : 'N/A'}</p>
+                    </div>
+                </div>
+            `;
+            document.getElementById('results').innerHTML = html;
+        }
+    </script>
+</body>
+
+</html>
