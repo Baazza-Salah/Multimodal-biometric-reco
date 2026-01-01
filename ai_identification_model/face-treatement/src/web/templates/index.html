@@ -162,6 +162,7 @@
         <div id="register" class="section active">
             <div class="controls">
                 <input type="text" id="nameInput" placeholder="Enter Name (e.g. Salah)">
+                <input type="text" id="countryInput" placeholder="Enter Country (e.g. Morocco)">
                 <button onclick="startCamera()">Open Camera</button>
             </div>
 
@@ -277,10 +278,16 @@
 
         async function startRegistration() {
             const name = document.getElementById('nameInput').value.trim();
+            const country = document.getElementById('countryInput').value.trim();
+
             if (!name) { alert("Please enter a name"); return; }
+            if (!country) { alert("Please enter a country"); return; }
 
             document.getElementById('startBtn').disabled = true;
             document.getElementById('progress-container').style.display = 'block';
+
+            // Generate UUID
+            const userUuid = crypto.randomUUID();
 
             let count = 1;
             const max = 20;
@@ -288,19 +295,19 @@
             const interval = setInterval(async () => {
                 if (count > max) {
                     clearInterval(interval);
-                    finishRegistration();
+                    finishRegistration(userUuid);
                     return;
                 }
 
                 document.getElementById('status').innerText = `Capturing feature ${count}/${max}...`;
                 document.getElementById('progressBar').value = count;
 
-                await captureAndSend(name, count);
+                await captureAndSend(name, country, userUuid, count);
                 count++;
             }, 1000);
         }
 
-        async function captureAndSend(name, count) {
+        async function captureAndSend(name, country, uuid, count) {
             const video = document.getElementById('video');
             const canvas = document.getElementById('canvas');
             const context = canvas.getContext('2d');
@@ -315,21 +322,34 @@
                 const response = await fetch('/extract_feature', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ image: imageData, name: name, count: count })
+                    body: JSON.stringify({
+                        image: imageData,
+                        name: name,
+                        country: country,
+                        uuid: uuid,
+                        count: count
+                    })
                 });
             } catch (err) {
                 console.error(err);
             }
         }
 
-        async function finishRegistration() {
+        async function finishRegistration(userUuid) {
             document.getElementById('status').innerText = "Training model...";
             try {
                 const response = await fetch('/train', { method: 'POST' });
                 const result = await response.json();
                 if (result.status === 'success') {
                     document.getElementById('status').innerText = "Registration Complete!";
-                    alert("Registration Successful!");
+                    alert(`Registration Successful!\n\nYour UUID is:\n${userUuid}\n\nPlease save this UUID.`);
+
+                    // Display UUID on screen as well
+                    const resultBox = document.createElement('div');
+                    resultBox.className = 'result-box';
+                    resultBox.style.textAlign = 'center';
+                    resultBox.innerHTML = `<h3>Registration Complete</h3><p>Your UUID: <strong>${userUuid}</strong></p><p>Please save this UUID.</p>`;
+                    document.getElementById('register').appendChild(resultBox);
                 }
             } catch (err) {
                 alert("Error: " + err);

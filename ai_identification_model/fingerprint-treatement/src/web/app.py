@@ -8,6 +8,8 @@ import numpy as np
 import base64
 import pandas as pd
 from pathlib import Path
+import uuid
+from cryptography.fernet import Fernet
 from flask import Flask, render_template, request, jsonify
 
 # Add parent directories to path for imports
@@ -25,7 +27,34 @@ app = Flask(__name__)
 # Configuration
 DATA_DIR = PROJECT_ROOT / 'data'
 CSV_PATH = DATA_DIR / 'features.csv'
+USERS_CSV_PATH = DATA_DIR / 'users.csv'
+KEY_PATH = DATA_DIR / 'secret.key'
 ML_MODEL_PATH = PROJECT_ROOT / 'models' / 'trained_model.pkl'
+
+class EncryptionManager:
+    def __init__(self, key_path):
+        self.key_path = key_path
+        self.key = self.load_or_generate_key()
+        self.cipher_suite = Fernet(self.key)
+
+    def load_or_generate_key(self):
+        if self.key_path.exists():
+            with open(self.key_path, 'rb') as key_file:
+                return key_file.read()
+        else:
+            key = Fernet.generate_key()
+            with open(self.key_path, 'wb') as key_file:
+                key_file.write(key)
+            return key
+
+    def encrypt(self, data):
+        return self.cipher_suite.encrypt(data.encode()).decode()
+
+    def decrypt(self, token):
+        return self.cipher_suite.decrypt(token.encode()).decode()
+
+# Initialize encryption manager
+encryption_manager = EncryptionManager(KEY_PATH)
 
 # Initialize extractor
 extractor = FingerprintFeatureExtractor()
@@ -49,9 +78,15 @@ def extract_feature():
             
         file = request.files['file']
         name = request.form.get('name')
+        country = request.form.get('country', 'Unknown')
+        user_uuid = request.form.get('uuid')
         
         if not name or file.filename == '':
             return jsonify({'status': 'error', 'message': 'Name and file are required'})
+
+        # Generate UUID if not provided
+        if not user_uuid:
+            user_uuid = str(uuid.uuid4())
 
         # Save temporary image
         temp_path = save_upload(file, 'temp_register.bmp')
@@ -61,16 +96,15 @@ def extract_feature():
             # Returns a list of dicts (original + augmented)
             features_list = extractor.extract_features(temp_path)
             
-            # Update filename for all features
+            # Update filename for all features to use UUID
             ext = Path(file.filename).suffix
-            # We use the provided name as the identifier
-            # In the CSV, 'filename' column is used as the label
-            filename = f"{name}{ext}" 
+            # Use UUID as the identifier in features.csv
+            filename = f"{user_uuid}{ext}" 
             
             for feat in features_list:
                 feat['filename'] = filename
             
-            # Append to CSV
+            # Append to Features CSV
             df = pd.DataFrame(features_list)
             
             # Ensure columns are in correct order (filename first)
@@ -81,8 +115,30 @@ def extract_feature():
                 df.to_csv(CSV_PATH, index=False)
             else:
                 df.to_csv(CSV_PATH, mode='a', header=False, index=False)
+
+            # Save Encrypted User Data
+            # Check if user already exists to avoid duplicates (optional, but good practice)
+            user_exists = False
+            if USERS_CSV_PATH.exists():
+                users_df = pd.read_csv(USERS_CSV_PATH)
+                if user_uuid in users_df['uuid'].values:
+                    user_exists = True
+            
+            if not user_exists:
+                user_data = f"{name}|{country}"
+                encrypted_data = encryption_manager.encrypt(user_data)
+                new_user = pd.DataFrame({'uuid': [user_uuid], 'encrypted_data': [encrypted_data]})
                 
-            return jsonify({'status': 'success', 'message': f'Features extracted for {name} ({len(features_list)} samples)'})
+                if not USERS_CSV_PATH.exists():
+                    new_user.to_csv(USERS_CSV_PATH, index=False)
+                else:
+                    new_user.to_csv(USERS_CSV_PATH, mode='a', header=False, index=False)
+                
+            return jsonify({
+                'status': 'success', 
+                'message': f'Features extracted for {name} ({len(features_list)} samples)',
+                'uuid': user_uuid
+            })
             
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)})
@@ -153,8 +209,38 @@ def identify():
                     # For now we use the default or what was there
                     math_id, math_conf, _ = math_matcher.identify(probe_features, min_absolute=70.0)
                     
+                    # Decrypt Name
+                    math_name = "Unknown"
+                    if math_id != "Unknown":
+                        # math_id is the filename, e.g., uuid.ext or uuid_aug.ext
+                        # We need to extract the UUID part. 
+                        # Assuming filename format is UUID.ext or UUID_something.ext
+                        # But wait, in extract_feature we set filename = f"{user_uuid}{ext}"
+                        # So math_id will be "UUID.ext"
+                        # We need to strip extension.
+                        
+                        # However, the matcher might return the label which IS the filename.
+                        # Let's try to parse the UUID from it.
+                        try:
+                            # Remove extension
+                            uuid_candidate = Path(math_id).stem
+                            # If there are other suffixes like _aug, we might need to handle them.
+                            # But extract_feature logic above just uses uuid+ext.
+                            
+                            users_df = pd.read_csv(USERS_CSV_PATH)
+                            user_row = users_df[users_df['uuid'] == uuid_candidate]
+                            
+                            if not user_row.empty:
+                                encrypted_data = user_row.iloc[0]['encrypted_data']
+                                decrypted_data = encryption_manager.decrypt(encrypted_data)
+                                math_name = decrypted_data.split('|')[0] # Name|Country
+                            else:
+                                math_name = f"UUID: {uuid_candidate} (Name not found)"
+                        except Exception as e:
+                            math_name = f"Error decrypting: {str(e)}"
+
                     results['math'] = {
-                        'identified': math_id if math_conf['absolute'] >= 70.0 else "Unknown",
+                        'identified': math_name if math_conf['absolute'] >= 70.0 else "Unknown",
                         'confidence': math_conf['absolute'],
                         'gap': math_conf['gap']
                     }
@@ -172,8 +258,25 @@ def identify():
                 ml_matcher.load(ML_MODEL_PATH)
                 ml_id, ml_conf, _ = ml_matcher.identify(probe_features, min_confidence=70.0)
                 
+                # Decrypt Name for ML
+                ml_name = "Unknown"
+                if ml_id != "Unknown":
+                    try:
+                        uuid_candidate = Path(ml_id).stem
+                        users_df = pd.read_csv(USERS_CSV_PATH)
+                        user_row = users_df[users_df['uuid'] == uuid_candidate]
+                        
+                        if not user_row.empty:
+                            encrypted_data = user_row.iloc[0]['encrypted_data']
+                            decrypted_data = encryption_manager.decrypt(encrypted_data)
+                            ml_name = decrypted_data.split('|')[0]
+                        else:
+                            ml_name = f"UUID: {uuid_candidate} (Name not found)"
+                    except Exception as e:
+                        ml_name = f"Error decrypting: {str(e)}"
+
                 results['ml'] = {
-                    'identified': ml_id if ml_conf['confidence'] >= 70.0 else "Unknown",
+                    'identified': ml_name if ml_conf['confidence'] >= 70.0 else "Unknown",
                     'confidence': ml_conf['confidence'],
                     'probability': ml_conf['probability']
                 }

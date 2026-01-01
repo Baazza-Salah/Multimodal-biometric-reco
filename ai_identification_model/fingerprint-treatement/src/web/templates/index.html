@@ -1,28 +1,112 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fingerprint Biometric System</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
-        .container { background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        h1 { color: #2c3e50; text-align: center; margin-bottom: 30px; }
-        .section { margin-bottom: 40px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; }
-        h2 { color: #34495e; margin-top: 0; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input[type="text"], input[type="file"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        button { background-color: #3498db; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; transition: background 0.3s; }
-        button:hover { background-color: #2980b9; }
-        button.secondary { background-color: #27ae60; }
-        button.secondary:hover { background-color: #219150; }
-        #results { margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; display: none; }
-        .result-item { margin-bottom: 10px; padding: 10px; background: white; border-left: 4px solid #3498db; }
-        .success { color: #27ae60; }
-        .error { color: #c0392b; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .section {
+            margin-bottom: 40px;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+        }
+
+        h2 {
+            color: #34495e;
+            margin-top: 0;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input[type="text"],
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+
+        button.secondary {
+            background-color: #27ae60;
+        }
+
+        button.secondary:hover {
+            background-color: #219150;
+        }
+
+        #results {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .result-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            background: white;
+            border-left: 4px solid #3498db;
+        }
+
+        .success {
+            color: #27ae60;
+        }
+
+        .error {
+            color: #c0392b;
+        }
     </style>
 </head>
+
 <body>
     <div class="container">
         <h1>Fingerprint Biometric System</h1>
@@ -32,6 +116,10 @@
             <div class="form-group">
                 <label for="reg-name">Person Name:</label>
                 <input type="text" id="reg-name" placeholder="e.g., user1">
+            </div>
+            <div class="form-group">
+                <label for="reg-country">Country:</label>
+                <input type="text" id="reg-country" placeholder="e.g., USA">
             </div>
             <div class="form-group">
                 <label for="reg-file">Fingerprint Image (BMP, PNG, JPG):</label>
@@ -55,7 +143,7 @@
                 <input type="file" id="ident-file" accept=".bmp,.png,.jpg,.jpeg,.tif">
             </div>
             <button onclick="identify()">Identify Person</button>
-            
+
             <div id="results">
                 <h3>Identification Results</h3>
                 <div id="math-result" class="result-item"></div>
@@ -67,29 +155,43 @@
     <script>
         async function register() {
             const name = document.getElementById('reg-name').value;
+            const country = document.getElementById('reg-country').value;
             const fileInput = document.getElementById('reg-file');
             const resultDiv = document.getElementById('reg-result');
-            
-            if (!name || fileInput.files.length === 0) {
-                alert('Please provide name and file');
+
+            if (!name || !country || fileInput.files.length === 0) {
+                alert('Please provide name, country, and file');
                 return;
             }
 
+            // Generate UUID
+            const userUuid = crypto.randomUUID();
+
             const formData = new FormData();
             formData.append('name', name);
+            formData.append('country', country);
+            formData.append('uuid', userUuid);
             formData.append('file', fileInput.files[0]);
 
             resultDiv.innerHTML = 'Processing...';
-            
+
             try {
                 const response = await fetch('/extract_feature', {
                     method: 'POST',
                     body: formData
                 });
                 const data = await response.json();
-                
+
                 if (data.status === 'success') {
-                    resultDiv.innerHTML = `<p class="success">✓ ${data.message}</p>`;
+                    resultDiv.innerHTML = `
+                        <p class="success">✓ ${data.message}</p>
+                        <div style="background: #e8f6f3; padding: 15px; border-radius: 5px; margin-top: 10px; border: 1px solid #a9dfbf;">
+                            <h3 style="margin-top: 0; color: #27ae60;">Registration Complete</h3>
+                            <p><strong>Your UUID:</strong> <span style="font-family: monospace; font-size: 1.2em;">${data.uuid}</span></p>
+                            <p style="font-size: 0.9em; color: #555;">Please save this UUID. It uniquely identifies your encrypted data.</p>
+                        </div>
+                    `;
+                    alert(`Registration Successful!\n\nYour UUID is:\n${data.uuid}\n\nPlease save this UUID.`);
                 } else {
                     resultDiv.innerHTML = `<p class="error">✗ ${data.message}</p>`;
                 }
@@ -101,11 +203,11 @@
         async function train() {
             const resultDiv = document.getElementById('train-result');
             resultDiv.innerHTML = 'Training model...';
-            
+
             try {
                 const response = await fetch('/train', { method: 'POST' });
                 const data = await response.json();
-                
+
                 if (data.status === 'success') {
                     resultDiv.innerHTML = `<p class="success">✓ ${data.message}</p>`;
                 } else {
@@ -121,7 +223,7 @@
             const resultsDiv = document.getElementById('results');
             const mathDiv = document.getElementById('math-result');
             const mlDiv = document.getElementById('ml-result');
-            
+
             if (fileInput.files.length === 0) {
                 alert('Please select a file');
                 return;
@@ -133,17 +235,17 @@
             resultsDiv.style.display = 'block';
             mathDiv.innerHTML = 'Analyzing...';
             mlDiv.innerHTML = 'Analyzing...';
-            
+
             try {
                 const response = await fetch('/identify', {
                     method: 'POST',
                     body: formData
                 });
                 const data = await response.json();
-                
+
                 if (data.status === 'success') {
                     const r = data.results;
-                    
+
                     // Math Result
                     if (r.math.error) {
                         mathDiv.innerHTML = `<strong>Math Matcher:</strong> ${r.math.error}`;
@@ -154,7 +256,7 @@
                             Gap: ${r.math.gap.toFixed(2)}%
                         `;
                     }
-                    
+
                     // ML Result
                     if (r.ml.error) {
                         mlDiv.innerHTML = `<strong>ML Matcher:</strong> ${r.ml.error}`;
@@ -175,4 +277,5 @@
         }
     </script>
 </body>
+
 </html>
